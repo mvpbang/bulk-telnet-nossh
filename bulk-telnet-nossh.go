@@ -1,45 +1,31 @@
 package main
 
 import (
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 	"gopkg.in/yaml.v3"
+	"io"
+	"log"
 	"net"
 	"os"
 	"sync"
 	"time"
 )
 
-// error handle
-func errHandle(err error) {
+// init
+func init() {
+	file, err := os.OpenFile("nossh.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	handleErr(err)
+
+	multiWriter := io.MultiWriter(file, os.Stdout)
+	log.SetFlags(log.Lshortfile | log.LstdFlags)
+	log.SetOutput(multiWriter)
+}
+
+// handle error
+func handleErr(err error) {
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 }
-
-// logger
-func setLogger() *zap.Logger {
-	// create file
-	file, err := os.OpenFile("telnet.log", os.O_CREATE|os.O_WRONLY, 0666)
-	errHandle(err)
-	//defer file.Close()
-
-	// file writer && console writer
-	fileWrite := zapcore.AddSync(file)
-	consoleWrite := zapcore.AddSync(os.Stdout)
-	encoderWrite := zapcore.NewMultiWriteSyncer(fileWrite, consoleWrite)
-
-	// encoder
-	encoder := zapcore.NewConsoleEncoder(zapcore.EncoderConfig{MessageKey: "msg"})
-
-	// core
-	core := zapcore.NewCore(encoder, encoderWrite, zap.InfoLevel)
-
-	// logger
-	return zap.New(core)
-}
-
-// yml文件解析
 
 type Config struct {
 	Target []string `yaml:"target"`
@@ -48,44 +34,40 @@ type Config struct {
 var config Config
 
 func readYaml() {
-	// read yaml
 	yfile, err := os.ReadFile("ips.yml")
-	errHandle(err)
+	handleErr(err)
 
 	// decode
 	err = yaml.Unmarshal(yfile, &config)
-	errHandle(err)
+	handleErr(err)
 }
 
 /*
 基于tcp连通性判断
 */
-func tryConnaddr(addr string, wg *sync.WaitGroup, logger *zap.Logger) {
+func tryConnaddr(addr string, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	// 设置连接超时时间为5秒
-	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+	// 设置连接超时时间为6秒
+	conn, err := net.DialTimeout("tcp", addr, 6*time.Second)
 	if err != nil {
-		//fmt.Printf("连接失败：%s \n", addr)
-		logger.Error("失败", zap.String("addr", addr))
+		log.Printf("失败 %s\n", addr)
 		return
 	} else {
-		//fmt.Printf("连接成功: %s \n", addr)
-		logger.Error("成功", zap.String("addr", addr))
+		log.Printf("成功 %s\n", addr)
 	}
 
-	defer conn.Close() // 关闭连接
-
+	defer conn.Close()
 }
 
 func main() {
 	readYaml()
 	var wg sync.WaitGroup
-	logger := setLogger()
 
 	for _, addr := range config.Target {
 		wg.Add(1)
-		go tryConnaddr(addr, &wg, logger)
+		go tryConnaddr(addr, &wg)
 	}
+
 	wg.Wait()
 }
